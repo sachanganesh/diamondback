@@ -20,7 +20,7 @@ class ParsimonyTree(object):
 
 		# for each nucleotide position
 		for i in range(self._msa.get_alignment_length()):
-			score = 0
+			score = 0 # score for tree given nucleotide states
 
 			# Assign states for leaves
 			clade_states = self.get_terminal_states(i)
@@ -29,13 +29,20 @@ class ParsimonyTree(object):
 			for clade in self._tree.get_nonterminals(order="postorder"):
 				children = clade.clades
 
+				# get left and right children of internal node
 				alpha = clade_states[children[0]]
 				beta = clade_states[children[1]]
 
+				# find common nucleotide states between children
 				common_states = alpha.intersection(beta)
+
+				# if there are common states
 				if common_states:
+					# use common state
 					clade_states[clade] = common_states
+				# otherwise
 				else:
+					# take all states and increment parsimony score
 					clade_states[clade] = alpha.union(beta)
 					score += 1
 
