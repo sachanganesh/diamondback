@@ -1,0 +1,8 @@
+CLUSTAL O(1.2.4) multiple sequence alignment
+
+Human        CACT
+Chimp        TACT
+Gibbon       GACT
+Bonobo       AGCC
+Gorilla      AGCA
+Lemur        TAGT
