@@ -17,15 +17,31 @@ class ParsimonyTree(object):
 
 	def get_parsimony_score(self):
 		total_score = 0
-		print(self._msa)
 
+		# for each nucleotide position
 		for i in range(self._msa.get_alignment_length()):
 			score = 0
 
-			for clade, nt in self.pair_msa_tree_leaves(i):
-				print(clade, nt)
+			# Assign states for leaves
+			clade_states = self.get_terminal_states(i)
 
-			break
+			# postorder traversal of internal nodes to resolve commonalities
+			for clade in self._tree.get_nonterminals(order="postorder"):
+				children = clade.clades
+
+				alpha = clade_states[children[0]]
+				beta = clade_states[children[1]]
+
+				common_states = alpha.intersection(beta)
+				if common_states:
+					clade_states[clade] = common_states
+				else:
+					clade_states[clade] = alpha.union(beta)
+					score += 1
+
+			total_score += score
+
+		return total_score
 
 	def find_alignment_index_from_clade(self, clade):
 		clade = str(clade)
@@ -34,7 +50,7 @@ class ParsimonyTree(object):
 			if self._msa[i].id == clade:
 				return i
 
-	def pair_msa_tree_leaves(self, nt_pos):
+	def get_terminal_states(self, nt_pos):
 		terminals = self._tree.get_terminals()
 		nts = []
 
@@ -42,12 +58,23 @@ class ParsimonyTree(object):
 			i = self.find_alignment_index_from_clade(clade)
 			nts.append(self._msa[i, nt_pos])
 
-		return list(zip(terminals, nts))
+		states = {}
+		for clade, nt in zip(terminals, nts):
+			states[clade] = set(nt)
+
+		return states
+
+
+	def visialize_tree(self):
+		Phylo.draw(self._tree)
 
 
 def main():
 	pt = ParsimonyTree("./test_data/test_msa.txt", "./test_data/test_tree.txt")
-	pt.get_parsimony_score()
+	score = pt.get_parsimony_score()
+	print(score)
+
+	pt.visialize_tree()
 
 if __name__ == "__main__":
 	main()

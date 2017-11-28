@@ -1,13 +1,1 @@
-(
-(
-(
-Bonobo:0.05556,
-Gorilla:0.05556)
-:0.22222,
-Human:0.05556)
-:0.00000,
-(
-Lemur:0.11111,
-Chimp:0.00000)
-:0.05556,
-Gibbon:0.05556);
+(((Human, Chimp), ((Gibbon, Lemur), Gorilla)), Bonobo);
