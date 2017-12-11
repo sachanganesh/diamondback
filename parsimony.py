@@ -8,10 +8,13 @@ General Usage:
 
 from Bio import AlignIO, Phylo # Format reader for clustal alignments and newick trees
 from Bio.Phylo.TreeConstruction import *
+from Bio.Phylo.BaseTree import *
 from ete3 import Tree # Newick tree reader
+from copy import copy, deepcopy
 
 import numpy as np
-from copy import deepcopy
+from matplotlib import pyplot as plt
+import seaborn as sns
 
 
 class ParsimonyTree(object):
@@ -65,6 +68,59 @@ class ParsimonyTree(object):
 				parents[clade] = path[-2]
 
 		return parents
+
+	@staticmethod
+	def _remove_from_tree(tree, removable):
+		clade_parent = ParsimonyTree._get_parents(tree)
+		rem_parent = clade_parent[removable]
+
+		rem_ind = rem_parent.clades.index(removable)
+		rem_parent.clades.remove(removable)
+
+		if rem_parent is not tree.root and len(rem_parent.clades) == 1:
+			rem_sibling = rem_parent.clades[0]
+			extra_parent = clade_parent[rem_parent]
+
+			extra_ind = extra_parent.clades.index(rem_parent)
+			extra_parent.clades.remove(rem_parent)
+
+			extra_parent.clades.insert(extra_ind, rem_sibling)
+
+			return (rem_ind, removable), (extra_ind, rem_parent)
+
+		return (rem_ind, removable), None
+
+	def _undo_remove_from_tree(tree, parent, clade_dt, pruned_dt):
+		if pruned_dt is None:
+
+
+	@staticmethod
+	def _insert_bifurcation(parent, clade_pos, new_clade_attr, insertable):
+		c = Clade(**new_clade_attr)
+
+		c.clades.append(insertable)
+		c.clades.append(parent.clades.pop(clade_pos))
+		parent.clades.insert(clade_pos, c)
+
+	@staticmethod
+	def _remove_bifurcation(clade, removable):
+		clade_parent = ParsimonyTree._get_parents(clade)
+		parent = clade_parent[removable]
+
+		if parent.clades[0] == removable:
+			ind = 1
+			keep = parent.clades[1]
+		else:
+			ind = 0
+			keep = parent.clades[0]
+
+		clade.clades.remove(parent)
+		clade.clades.insert(ind, keep)
+		del parent
+
+	@staticmethod
+	def _has_subtree(clade):
+		return not all([c.is_terminal() for c in clade.clades])
 
 	@staticmethod
 	def get_parsimony_score(msa, tree):
@@ -205,14 +261,52 @@ class ParsimonyTree(object):
 		return neighbors
 
 	@staticmethod
-	def visialize_tree(tree):
+	def get_spr_neighbors(msa, tree):
+		print(tree)
+		neighbors = []
+		clade_parent = ParsimonyTree._get_parents(tree)
+
+		for clade in tree.get_nonterminals():
+			if clade is not tree.root and ParsimonyTree._has_subtree(clade):
+				parent = clade_parent[clade]
+				siblings = copy(parent.clades)
+
+				clade_dt, pruned_dt = ParsimonyTree._remove_from_tree(tree, clade)
+				print("pruned tree:")
+				print(tree)
+				for other_clade in tree.find_clades():
+					if other_clade is not tree.root and other_clade not in siblings:
+						ind = clade_parent[other_clade].clades.index(other_clade)
+						ParsimonyTree._insert_bifurcation(clade_parent[other_clade], ind, {}, clade)
+
+						neighbors.append(tree)
+						Phylo.draw_ascii(tree)
+						print("neighbor:")
+						print(tree)
+						# print(ParsimonyTree.get_parsimony_score(msa, tree))
+
+						ParsimonyTree._remove_bifurcation(clade_parent[other_clade], clade)
+						exit(1)
+
+				parent.clades.insert(clade_dt[0], clade)
+
+		return neighbors
+
+	@staticmethod
+	def get_tbr_neighbors(tree):
+		pass
+
+	@staticmethod
+	def visualize_tree(tree):
 		Phylo.draw(tree)
 
 
 class MonteCarlo(object):
-	def __init__(self, msa, init_tree, num_iterations, accept_prob):
+	def __init__(self, msa, init_tree, neighbor_fn, num_iterations, accept_prob):
 		self._msa = msa
 		self._states = [init_tree]
+		self._past_scores = []
+		self._neighbor_fn = neighbor_fn
 		self._num_iterations = num_iterations
 		self._accept_prob = accept_prob
 
@@ -222,8 +316,9 @@ class MonteCarlo(object):
 	def _get_next_state(self):
 		state = self._states[-1]
 		current_score = ParsimonyTree.get_parsimony_score(self._msa, state)
+		self._past_scores.append(current_score)
 
-		neighbors = ParsimonyTree.get_nni_neighbors(state)
+		neighbors = self._neighbor_fn(state)
 		scores = []
 		n_high = 0
 
@@ -237,12 +332,15 @@ class MonteCarlo(object):
 
 			if n_high == 0:
 				high_w = 0
+			elif n_high == len(scores):
+				high_w = 1 / n_high
 			else:
 				high_w = self._accept_prob / n_high
 
 			unif_w = (1 - high_w * n_high) / (len(neighbors) - n_high)
 			w = [high_w if s > current_score else unif_w for s in scores]
 
+			self._past_scores.extend(scores)
 			return np.random.choice(neighbors, p=w)
 		else:
 			return None
@@ -259,20 +357,28 @@ class MonteCarlo(object):
 
 		return next_state
 
+	def get_scores(self):
+		return self._past_scores
+
 
 def main():
 	msa = ParsimonyTree.read_msa("./test_data/test_msa.txt")
-	i_tree = ParsimonyTree.read_tree("./test_data/test_tree2.txt")
-
-	mcmc = MonteCarlo(msa, i_tree, 20, 0.2)
-	f_tree = mcmc.get_tree()
-
-	# ParsimonyTree.visialize_tree(i_tree)
-	# ParsimonyTree.visialize_tree(f_tree)
+	i_tree = ParsimonyTree.read_tree("./test_data/test_tree.txt")
 	Phylo.draw_ascii(i_tree)
-	print("inital score:", ParsimonyTree.get_parsimony_score(msa, i_tree))
-	Phylo.draw_ascii(f_tree)
-	print("final score:", ParsimonyTree.get_parsimony_score(msa, f_tree))
+
+	ParsimonyTree.get_spr_neighbors(msa, i_tree)
+
+	# mcmc = MonteCarlo(msa, i_tree, ParsimonyTree.get_spr_neighbors, 20, 0.1)
+	# f_tree = mcmc.get_tree()
+	#
+	# Phylo.draw_ascii(i_tree)
+	# print("inital score:", ParsimonyTree.get_parsimony_score(msa, i_tree))
+	# Phylo.draw_ascii(f_tree)
+	# print("final score:", ParsimonyTree.get_parsimony_score(msa, f_tree))
+	#
+	# sns.distplot(mcmc.get_scores())
+	# plt.show()
+
 
 if __name__ == "__main__":
 	main()
