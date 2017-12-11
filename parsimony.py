@@ -30,11 +30,13 @@ class ParsimonyTree(object):
 	def _find_alignment_index_from_clade(msa, clade):
 		# get clade id
 		clade = str(clade)
-
-		# search for clade id in msa and return index
-		for i in range(len(msa)):
-			if msa[i].id == clade:
-				return i
+		if clade is not "Clade":
+			# search for clade id in msa and return index
+			for i in range(len(msa)):
+				if msa[i].id == clade:
+					return i
+		else:
+			return None
 
 	@staticmethod
 	def _get_terminal_states(msa, tree, nt_pos):
@@ -44,12 +46,15 @@ class ParsimonyTree(object):
 		# get the nucleotide at a position for each leaf
 		for clade in terminals:
 			i = ParsimonyTree._find_alignment_index_from_clade(msa, clade)
-			nts.append(msa[i, nt_pos])
+			if i is not None:
+				nts.append(msa[i, nt_pos])
+			else:
+				nts.append(None)
 
 		# combine both nucleotide and leaf data into dict
 		states = {}
 		for clade, nt in zip(terminals, nts):
-			states[clade] = set(nt)
+			states[clade] = set([nt])
 
 		return states
 
@@ -68,31 +73,6 @@ class ParsimonyTree(object):
 				parents[clade] = path[-2]
 
 		return parents
-
-	@staticmethod
-	def _remove_from_tree(tree, removable):
-		clade_parent = ParsimonyTree._get_parents(tree)
-		rem_parent = clade_parent[removable]
-
-		rem_ind = rem_parent.clades.index(removable)
-		rem_parent.clades.remove(removable)
-
-		if rem_parent is not tree.root and len(rem_parent.clades) == 1:
-			rem_sibling = rem_parent.clades[0]
-			extra_parent = clade_parent[rem_parent]
-
-			extra_ind = extra_parent.clades.index(rem_parent)
-			extra_parent.clades.remove(rem_parent)
-
-			extra_parent.clades.insert(extra_ind, rem_sibling)
-
-			return (rem_ind, removable), (extra_ind, rem_parent)
-
-		return (rem_ind, removable), None
-
-	def _undo_remove_from_tree(tree, parent, clade_dt, pruned_dt):
-		if pruned_dt is None:
-
 
 	@staticmethod
 	def _insert_bifurcation(parent, clade_pos, new_clade_attr, insertable):
@@ -123,6 +103,14 @@ class ParsimonyTree(object):
 		return not all([c.is_terminal() for c in clade.clades])
 
 	@staticmethod
+	def _neighbor_visited(clade, other_clade, visited_pairs):
+		for pair in visited_pairs:
+			if pair[0] == clade and pair[1] == other_clade:
+				return True
+
+		return False
+
+	@staticmethod
 	def get_parsimony_score(msa, tree):
 		total_score = 0
 
@@ -136,22 +124,26 @@ class ParsimonyTree(object):
 			# postorder traversal of internal nodes to resolve commonalities
 			for clade in tree.get_nonterminals(order="postorder"):
 				children = clade.clades
+				common_states = set()
 
-				# get left and right children of internal node
-				alpha = clade_states[children[0]]
-				beta = clade_states[children[1]]
+				for i, child in enumerate(children):
+					if i is 0:
+						common_states = clade_states[child]
+					else:
+						beta = clade_states[child]
 
-				# find common nucleotide states between children
-				common_states = alpha.intersection(beta)
+						# find common nucleotide states between children
+						common_states = common_states.intersection(beta)
 
-				# if there are common states
+				# if there are common states, use them
 				if common_states:
-					# use common state
 					clade_states[clade] = common_states
-				# otherwise
 				else:
+					for child in children:
+						common_states = common_states.union(clade_states[child])
+
 					# take all states and increment parsimony score
-					clade_states[clade] = alpha.union(beta)
+					clade_states[clade] = common_states
 					score += 1
 
 			# add to parsimony score
@@ -261,34 +253,34 @@ class ParsimonyTree(object):
 		return neighbors
 
 	@staticmethod
-	def get_spr_neighbors(msa, tree):
-		print(tree)
+	def get_spr_neighbors(tree):
 		neighbors = []
+		visited_pairs = []
 		clade_parent = ParsimonyTree._get_parents(tree)
 
-		for clade in tree.get_nonterminals():
-			if clade is not tree.root and ParsimonyTree._has_subtree(clade):
+		for clade in tree.find_clades():
+			if clade is not tree.root:
 				parent = clade_parent[clade]
 				siblings = copy(parent.clades)
 
-				clade_dt, pruned_dt = ParsimonyTree._remove_from_tree(tree, clade)
-				print("pruned tree:")
-				print(tree)
+				clade_ind = parent.clades.index(clade)
+				parent.clades.remove(clade)
+
 				for other_clade in tree.find_clades():
-					if other_clade is not tree.root and other_clade not in siblings:
-						ind = clade_parent[other_clade].clades.index(other_clade)
-						ParsimonyTree._insert_bifurcation(clade_parent[other_clade], ind, {}, clade)
+					if not ParsimonyTree._neighbor_visited(clade, other_clade, visited_pairs) and other_clade is not tree.root and other_clade not in siblings:
+						if other_clade is parent and len(siblings) - 1 is 1:
+							continue
+						else:
+							ind = clade_parent[other_clade].clades.index(other_clade)
+							visited_pairs.append((clade, other_clade))
 
-						neighbors.append(tree)
-						Phylo.draw_ascii(tree)
-						print("neighbor:")
-						print(tree)
-						# print(ParsimonyTree.get_parsimony_score(msa, tree))
+							ParsimonyTree._insert_bifurcation(clade_parent[other_clade], ind, {}, clade)
 
-						ParsimonyTree._remove_bifurcation(clade_parent[other_clade], clade)
-						exit(1)
+							neighbors.append(deepcopy(tree))
 
-				parent.clades.insert(clade_dt[0], clade)
+							ParsimonyTree._remove_bifurcation(clade_parent[other_clade], clade)
+
+				parent.clades.insert(clade_ind, clade)
 
 		return neighbors
 
@@ -363,21 +355,19 @@ class MonteCarlo(object):
 
 def main():
 	msa = ParsimonyTree.read_msa("./test_data/test_msa.txt")
-	i_tree = ParsimonyTree.read_tree("./test_data/test_tree.txt")
+	i_tree = ParsimonyTree.read_tree("./test_data/test_tree3.txt")
+
+	mcmc = MonteCarlo(msa, i_tree, ParsimonyTree.get_spr_neighbors, 20, 0.0001)
+	f_tree = mcmc.get_tree()
+
 	Phylo.draw_ascii(i_tree)
+	print("inital score:", ParsimonyTree.get_parsimony_score(msa, i_tree))
+	Phylo.draw_ascii(f_tree)
+	print("final score:", ParsimonyTree.get_parsimony_score(msa, f_tree))
 
-	ParsimonyTree.get_spr_neighbors(msa, i_tree)
-
-	# mcmc = MonteCarlo(msa, i_tree, ParsimonyTree.get_spr_neighbors, 20, 0.1)
-	# f_tree = mcmc.get_tree()
-	#
-	# Phylo.draw_ascii(i_tree)
-	# print("inital score:", ParsimonyTree.get_parsimony_score(msa, i_tree))
-	# Phylo.draw_ascii(f_tree)
-	# print("final score:", ParsimonyTree.get_parsimony_score(msa, f_tree))
-	#
 	# sns.distplot(mcmc.get_scores())
-	# plt.show()
+	plt.hist(mcmc.get_scores())
+	plt.show()
 
 
 if __name__ == "__main__":
