@@ -276,7 +276,31 @@ class ParsimonyTree(object):
 
 							ParsimonyTree._insert_bifurcation(clade_parent[other_clade], ind, {}, clade)
 
-							neighbors.append(deepcopy(tree))
+							cp_tree = deepcopy(tree)
+							cp_parent = ParsimonyTree._get_parents(cp_tree)
+
+							# clean up extraneous clades
+							for c in copy(cp_tree.find_clades()):
+								p = cp_parent[c]
+								if len(c.clades) is 1:
+									if p is not cp_tree.root and p is not None:
+										if c.branch_length is not None and ch.branch_length is not None:
+											p.branch_length += c.branch_length
+
+										p.clades.extend(c.clades)
+										p.clades.remove(c)
+									else:
+										ch = c.clades[0]
+
+										if c.branch_length is not None and ch.branch_length is not None:
+											c.branch_length += ch.branch_length
+
+										c.clades.extend(ch.clades)
+										c.clades.remove(ch)
+								elif c.is_terminal() and c.name == None:
+									p.remove(c)
+
+							neighbors.append(cp_tree)
 
 							ParsimonyTree._remove_bifurcation(clade_parent[other_clade], clade)
 
@@ -355,9 +379,9 @@ class MonteCarlo(object):
 
 def main():
 	msa = ParsimonyTree.read_msa("./test_data/test_msa.txt")
-	i_tree = ParsimonyTree.read_tree("./test_data/test_tree3.txt")
+	i_tree = ParsimonyTree.read_tree("./test_data/test_tree.txt")
 
-	mcmc = MonteCarlo(msa, i_tree, ParsimonyTree.get_spr_neighbors, 20, 0.0001)
+	mcmc = MonteCarlo(msa, i_tree, ParsimonyTree.get_spr_neighbors, 20, 0.01)
 	f_tree = mcmc.get_tree()
 
 	Phylo.draw_ascii(i_tree)
