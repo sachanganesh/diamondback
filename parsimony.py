@@ -6,14 +6,15 @@ General Usage:
 	parsimony.py -a <alignment> -n <newick_tree> -r <number_of_random_rearrangements> -p <probability>
 """
 
+import argparse
 from Bio import AlignIO, Phylo # Format reader for clustal alignments and newick trees
 from Bio.Phylo.TreeConstruction import *
 from Bio.Phylo.BaseTree import *
 from copy import copy, deepcopy
+from ete3 import Tree as InteractiveTree
 
 import numpy as np
 from matplotlib import pyplot as plt
-import seaborn as sns
 
 
 class ParsimonyTree(object):
@@ -179,12 +180,18 @@ class ParsimonyTree(object):
 		skippable = []
 		node_parent = ParsimonyTree._get_parents(tree)
 
+		# Assuming a binary tree:
+		# for every internal node
 		for clade in tree.get_nonterminals():
+			# if the clade is an internal node that's not the root or its direct children
 			if clade is not tree.root and clade not in skippable:
 				parent = node_parent[clade]
 				left_child = clade.clades[0]
 				right_child = clade.clades[1]
 
+				# depending on if the clade is a left or right node
+				# switch the node with the sibling branch
+				# then alternate
 				if clade == parent.clades[0]:
 					sibling = parent.clades[1]
 
@@ -244,6 +251,8 @@ class ParsimonyTree(object):
 
 				skippable.extend([left_child, right_child])
 
+				# as long as the root's children aren't leaves
+				# switch all the children of each branch
 				if not left_child.is_terminal() and not right_child.is_terminal():
 					left_child_right = left_child.clades[1]
 					right_child_left = right_child.clades[0]
@@ -280,33 +289,45 @@ class ParsimonyTree(object):
 		visited_pairs = []
 		clade_parent = ParsimonyTree._get_parents(tree)
 
+		# for every node in the tree
 		for clade in tree.find_clades():
+			# as long as it's not the root
 			if clade is not tree.root:
+				# get the parent and siblings of the node
 				parent = clade_parent[clade]
 				siblings = copy(parent.clades)
 
+				# get the original index and remove the node from the tree
 				clade_ind = parent.clades.index(clade)
 				parent.clades.remove(clade)
 
+				# for every other node in the tree
 				for other_clade in tree.find_clades():
+					# as long as it hasn't been visited before and it's not the root or sibling
 					if not ParsimonyTree._neighbor_visited(clade, other_clade, visited_pairs) and other_clade is not tree.root and other_clade not in siblings:
 						if other_clade is parent and len(siblings) - 1 is 1:
 							continue
 						else:
+							# get the index and save this neighbor-tree pair
 							ind = clade_parent[other_clade].clades.index(other_clade)
 							visited_pairs.append((clade, other_clade))
 
+							# insert the branch into this place in the tree
 							ParsimonyTree._insert_bifurcation(clade_parent[other_clade], ind, {}, clade)
 
+							# copy the tree
 							cp_tree = deepcopy(tree)
 
 							# clean up extraneous clades
 							ParsimonyTree._remove_extraneous_clade(cp_tree)
 
+							# add tree to neighbors
 							neighbors.append(cp_tree)
 
+							# undo insertion of the branch
 							ParsimonyTree._remove_bifurcation(clade_parent[other_clade], clade)
 
+				# put the node back where it was
 				parent.clades.insert(clade_ind, clade)
 
 		return neighbors
@@ -354,7 +375,7 @@ class ParsimonyTree(object):
 		return neighbors
 
 	@staticmethod
-	def visualize_tree(tree):
+	def visualize_tree(tree, figure_title="Phylogenetic Tree"):
 		Phylo.draw(tree)
 
 
@@ -418,19 +439,54 @@ class MonteCarlo(object):
 		return self._past_scores
 
 
-def main():
-	msa = ParsimonyTree.read_msa("./test_data/test_msa.txt")
-	i_tree = ParsimonyTree.read_tree("./test_data/test_tree.txt")
+def parse_arguments():
+	parser = argparse.ArgumentParser(description="Mossback: a parsimony tree searcher using Metropolis sampling")
+	parser.add_argument("a", metavar="msa_filepath", type=str, help="Multiple sequence alignment file in Clustal format")
+	parser.add_argument("n", metavar="tree_filepath", type=str, help="Tree representation file in Newick format")
+	parser.add_argument("r", metavar="r", type=int, default=50, help="Number of random local tree rearrangements")
+	parser.add_argument("p", metavar="p", type=float, default=0.05, help="Probability at which worse parsimony scores will be accepted")
+	parser.add_argument("o", metavar="output_filepath", type=str, help="Filepath to write final tree found through search")
+	parser.add_argument("-nni", "--nni", action="store_true", help="Use nearest neighbor interchange for neighbor-tree creation")
+	parser.add_argument("-spr", "--spr", action="store_true", help="Use subtree pruning and regrafting for neighbor-tree creation")
+	parser.add_argument("-tbr", "--tbr", action="store_true", help="Use tree bisection and reconnection for neighbor-tree creation")
 
-	mcmc = MonteCarlo(msa, i_tree, ParsimonyTree.get_tbr_neighbors, 20, 0.01)
+	args = parser.parse_args()
+	return args
+
+
+def main():
+	args = parse_arguments()
+
+	msa = ParsimonyTree.read_msa(args.a)
+	i_tree = ParsimonyTree.read_tree(args.n)
+
+	nb_f = ParsimonyTree.get_nni_neighbors
+	if args.spr:
+		nb_f = ParsimonyTree.get_spr_neighbors
+	elif args.tbr:
+		nb_f = ParsimonyTree.get_tbr_neighbors
+
+	mcmc = MonteCarlo(msa, i_tree, nb_f, args.r, args.p)
 	f_tree = mcmc.get_tree()
 
-	Phylo.draw_ascii(i_tree)
-	print("inital score:", ParsimonyTree.get_parsimony_score(msa, i_tree))
-	Phylo.draw_ascii(f_tree)
-	print("final score:", ParsimonyTree.get_parsimony_score(msa, f_tree))
+	with open(args.o, "w") as outfile:
+		Phylo.write(f_tree, outfile, "newick")
 
-	# sns.distplot(mcmc.get_scores())
+	print("\n=========================\n")
+	print("Original Tree")
+	print("Score:", ParsimonyTree.get_parsimony_score(msa, i_tree))
+	Phylo.draw(i_tree)
+	Phylo.draw_ascii(i_tree)
+
+	print("\n=========================\n")
+	print("Final Tree")
+	print("Score:", ParsimonyTree.get_parsimony_score(msa, f_tree))
+	Phylo.draw(f_tree)
+	Phylo.draw_ascii(f_tree)
+
+	print("\n=========================\n")
+	print("Histogram of Parsimony Scores")
+	plt.title("Histogram of Parsimony Scores")
 	plt.hist(mcmc.get_scores())
 	plt.show()
 
