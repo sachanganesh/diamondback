@@ -9,7 +9,6 @@ General Usage:
 from Bio import AlignIO, Phylo # Format reader for clustal alignments and newick trees
 from Bio.Phylo.TreeConstruction import *
 from Bio.Phylo.BaseTree import *
-from ete3 import Tree # Newick tree reader
 from copy import copy, deepcopy
 
 import numpy as np
@@ -96,7 +95,30 @@ class ParsimonyTree(object):
 
 		clade.clades.remove(parent)
 		clade.clades.insert(ind, keep)
-		del parent
+
+	@staticmethod
+	def _remove_extraneous_clade(tree):
+		for c in tree.find_clades():
+			clade_parent = ParsimonyTree._get_parents(tree)
+			p = clade_parent[c]
+
+			if len(c.clades) is 1:
+				if p is not tree.root and p is not None:
+					if p.branch_length is not None and c.branch_length is not None:
+						p.branch_length += c.branch_length
+
+					p.clades.extend(c.clades)
+					p.clades.remove(c)
+				else:
+					ch = c.clades[0]
+
+					if c.branch_length is not None and ch.branch_length is not None:
+						c.branch_length += ch.branch_length
+
+					c.clades.extend(ch.clades)
+					c.clades.remove(ch)
+			elif c.is_terminal() and c.name == None:
+				p.clades.remove(c)
 
 	@staticmethod
 	def _has_subtree(clade):
@@ -277,28 +299,9 @@ class ParsimonyTree(object):
 							ParsimonyTree._insert_bifurcation(clade_parent[other_clade], ind, {}, clade)
 
 							cp_tree = deepcopy(tree)
-							cp_parent = ParsimonyTree._get_parents(cp_tree)
 
 							# clean up extraneous clades
-							for c in copy(cp_tree.find_clades()):
-								p = cp_parent[c]
-								if len(c.clades) is 1:
-									if p is not cp_tree.root and p is not None:
-										if c.branch_length is not None and ch.branch_length is not None:
-											p.branch_length += c.branch_length
-
-										p.clades.extend(c.clades)
-										p.clades.remove(c)
-									else:
-										ch = c.clades[0]
-
-										if c.branch_length is not None and ch.branch_length is not None:
-											c.branch_length += ch.branch_length
-
-										c.clades.extend(ch.clades)
-										c.clades.remove(ch)
-								elif c.is_terminal() and c.name == None:
-									p.remove(c)
+							ParsimonyTree._remove_extraneous_clade(cp_tree)
 
 							neighbors.append(cp_tree)
 
@@ -310,7 +313,45 @@ class ParsimonyTree(object):
 
 	@staticmethod
 	def get_tbr_neighbors(tree):
-		pass
+		neighbors = []
+		visited_pairs = []
+		clade_parent = ParsimonyTree._get_parents(tree)
+
+		for clade in tree.find_clades():
+			if clade is not tree.root:
+				parent = clade_parent[clade]
+				siblings = copy(parent.clades)
+
+				clade_ind = parent.clades.index(clade)
+				parent.clades.remove(clade)
+
+				tmp = Tree.from_clade(deepcopy(clade), rooted=True)
+
+				for other_clade in tree.find_clades():
+					if not ParsimonyTree._neighbor_visited(tmp, other_clade, visited_pairs) and other_clade is not tree.root and other_clade not in siblings:
+						if other_clade is parent and len(siblings) - 1 is 1:
+							continue
+						else:
+							for order in tmp.find_clades():
+								# tmp.root_with_outgroup(order)
+
+								ind = clade_parent[other_clade].clades.index(other_clade)
+								visited_pairs.append((tmp.root, other_clade))
+
+								ParsimonyTree._insert_bifurcation(clade_parent[other_clade], ind, {}, tmp.root)
+
+								cp_tree = deepcopy(tree)
+
+								# clean up extraneous clades
+								ParsimonyTree._remove_extraneous_clade(cp_tree)
+
+								neighbors.append(cp_tree)
+
+								ParsimonyTree._remove_bifurcation(clade_parent[other_clade], tmp.root)
+
+				parent.clades.insert(clade_ind, clade)
+
+		return neighbors
 
 	@staticmethod
 	def visualize_tree(tree):
@@ -381,7 +422,7 @@ def main():
 	msa = ParsimonyTree.read_msa("./test_data/test_msa.txt")
 	i_tree = ParsimonyTree.read_tree("./test_data/test_tree.txt")
 
-	mcmc = MonteCarlo(msa, i_tree, ParsimonyTree.get_spr_neighbors, 20, 0.01)
+	mcmc = MonteCarlo(msa, i_tree, ParsimonyTree.get_tbr_neighbors, 20, 0.01)
 	f_tree = mcmc.get_tree()
 
 	Phylo.draw_ascii(i_tree)
