@@ -1,5 +1,4 @@
 biopython
-ete3
 pyqt5
 numpy
 argparse

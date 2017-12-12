@@ -11,7 +11,6 @@ from Bio import AlignIO, Phylo # Format reader for clustal alignments and newick
 from Bio.Phylo.TreeConstruction import *
 from Bio.Phylo.BaseTree import *
 from copy import copy, deepcopy
-from ete3 import Tree as InteractiveTree
 
 import numpy as np
 from matplotlib import pyplot as plt
