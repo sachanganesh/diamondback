@@ -4,7 +4,10 @@ Sachandhan Ganesh, 2017
 
 BIOL 595, Purdue University
 
+**It should be noted that parsimony trees are not the state-of-the-art method used for phylogenetic tree construction. In fact, they are generally not preferred.**
+
 ---
+
 
 Please install required python packages using `pip install -r requirements.txt`.
 
