@@ -1,1 +1,0 @@
-(((Human, Chimp), ((Gibbon, Lemur), Gorilla)), Bonobo);
