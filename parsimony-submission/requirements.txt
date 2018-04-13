@@ -1,5 +1,0 @@
-biopython
-pyqt5
-numpy
-argparse
-matplotlib
