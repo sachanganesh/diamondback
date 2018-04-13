@@ -1,7 +1,9 @@
-Mossback: a parsimony tree searcher using Metropolis sampling
+# Mossback: a parsimony tree searcher using Metropolis sampling
 
 Sachandhan Ganesh, 2017
-BIOL 595
+BIOL 595, Purdue University
+
+---
 
 Please install required python packages using `pip install -r requirements.txt`.
 
